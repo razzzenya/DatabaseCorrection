@@ -1,4 +1,5 @@
 ﻿using Microsoft.Data.SqlClient;
+using Microsoft.Data.Sqlite;
 using System.Text.Json;
 using System.Xml.Linq;
 
@@ -31,7 +32,7 @@ public class Correction
 
     public void StartProcessing()
     {
-        var refConnStr = "Pooling=false;Data Source=192.168.0.109,1433;Initial Catalog=TerplanSymbology;User ID=sa;Password=samis;TrustServerCertificate=True";
+        var refConnStr = "terplan-layer-library-v2.gpkg";
         var curConnStr = "Pooling=false;Data Source=192.168.0.109,1433;Initial Catalog=Empty;User ID=sa;Password=samis;TrustServerCertificate=True";
 
         var refTables = GetTableNames(refConnStr, exclude: "layer_styles");
@@ -94,7 +95,7 @@ public class Correction
                 {
                     LayerName = refLayer.Name,
                     Actions = ["Add layer", "Add field(s)", "Add style(s)"],
-                    FieldsToAdd = refLayer.Fields.Except(["GEOM"]).ToList(),
+                    FieldsToAdd = refLayer.Fields.Except(["geom", ""]).ToList(),
                     FieldsToRemove = [],
                     StylesToAdd = ReferenceStylesUnion[refLayer.Name],
                     StylesToRemove = []
@@ -103,7 +104,7 @@ public class Correction
             else // Слои, которые есть в обоих списках
             {
                 var actions = new List<string>();
-                var fieldsToAdd = refLayer.Fields.Except(curLayer.Fields.Append("GEOM")).ToList(); // Игнорируем поле GEOM при сравнении
+                var fieldsToAdd = refLayer.Fields.Except(curLayer.Fields.Concat(["geom", ""])).ToList(); // Игнорируем поле GEOM при сравнении
                 var fieldsToRemove = curLayer.Fields.Except(refLayer.Fields.Append("ID")).ToList(); // Игнорируем поле ID при сравнении
                 var stylesToAdd = new Dictionary<string, string>();
                 var stylesToRemove = new Dictionary<string, string>();
@@ -169,17 +170,35 @@ public class Correction
     static List<string> GetTableNames(string connStr, string? prefix = null, string? exclude = null)
     {
         var tables = new List<string>();
-        using var connection = new SqlConnection(connStr);
-        connection.Open();
-        var command = connection.CreateCommand();
-        command.CommandText = "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'";
-        using var reader = command.ExecuteReader();
-        while (reader.Read())
+        if (connStr.EndsWith(".gpkg"))
         {
-            var name = reader.GetString(0);
-            if (exclude != null && exclude.Contains(name)) continue;
-            if (prefix != null && !name.StartsWith(prefix)) continue;
-            tables.Add(name);
+            using var connection = new SqliteConnection($"Data Source={connStr}");
+            connection.Open();
+            var command = connection.CreateCommand();
+            command.CommandText = "SELECT table_name FROM gpkg_contents";
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                var name = reader.GetString(0);
+                if (exclude != null && exclude.Contains(name)) continue;
+                if (prefix != null && !name.StartsWith(prefix)) continue;
+                tables.Add(name);
+            }
+        }
+        else
+        {
+            using var connection = new SqlConnection(connStr);
+            connection.Open();
+            var command = connection.CreateCommand();
+            command.CommandText = "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'";
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                var name = reader.GetString(0);
+                if (exclude != null && exclude.Contains(name)) continue;
+                if (prefix != null && !name.StartsWith(prefix)) continue;
+                tables.Add(name);
+            }
         }
         return tables;
     }
@@ -187,14 +206,29 @@ public class Correction
     static List<string> GetTableFields(string connStr, string tableName)
     {
         var fields = new List<string>();
-        using var connection = new SqlConnection(connStr);
-        connection.Open();
-        var command = connection.CreateCommand();
-        command.CommandText = $"SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '{tableName}'";
-        using var reader = command.ExecuteReader();
-        while (reader.Read())
+        if (connStr.EndsWith(".gpkg") || connStr.EndsWith(".sqlite"))
         {
-            fields.Add(reader.GetString(0));
+            using var connection = new SqliteConnection($"Data Source={connStr}");
+            connection.Open();
+            var command = connection.CreateCommand();
+            command.CommandText = $"PRAGMA table_info('{tableName}')";
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                fields.Add(reader.GetString(1));
+            }
+        }
+        else
+        {
+            using var connection = new SqlConnection(connStr);
+            connection.Open();
+            var command = connection.CreateCommand();
+            command.CommandText = $"SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '{tableName}'";
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                fields.Add(reader.GetString(0));
+            }
         }
         return fields;
     }
@@ -202,10 +236,10 @@ public class Correction
     static Dictionary<string, string> GetStylesFromReferenceTable(string connStr, string tableName)
     {
         var styles = new Dictionary<string, string>();
-        using var connection = new SqlConnection(connStr);
+        using var connection = new SqliteConnection($"Data Source={connStr}");
         connection.Open();
         var command = connection.CreateCommand();
-        command.CommandText = $"SELECT styleQML FROM layer_styles WHERE CAST(f_table_name AS varchar(max)) = '{tableName}'";
+        command.CommandText = $"SELECT styleQML FROM layer_styles WHERE f_table_name = '{tableName}'";
         using var reader = command.ExecuteReader();
         if (reader.Read())
         {
