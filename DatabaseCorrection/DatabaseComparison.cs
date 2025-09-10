@@ -388,6 +388,6 @@ public class DatabaseComparison
             else if (geomTypes[i] == "Multiline" || geomTypes[i] == "Multipolygon") geomTypes[i] = "Контур";
             else geomTypes[i] = "";
         }
-        return geomTypes;
+        return geomTypes.Distinct().ToList();
     }
 }
