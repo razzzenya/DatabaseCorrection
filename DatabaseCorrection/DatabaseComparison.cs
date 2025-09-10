@@ -133,14 +133,7 @@ public class DatabaseComparison
                 var stylesToAdd = new Dictionary<string, StyleInfo>();
                 foreach (var kv in layerUnion.Styles)
                 {
-                    if (kv.Value.GeometryTypes.Contains("Multipoint"))
-                    {
-                        stylesToAdd[kv.Key] = new StyleInfo { Name = kv.Value.Name, GeometryTypes = ["Знак"] };
-                    }
-                    if (kv.Value.GeometryTypes.Contains("Multiline") || kv.Value.GeometryTypes.Contains("Multipolygon"))
-                    {
-                        stylesToAdd[kv.Key] = new StyleInfo { Name = kv.Value.Name, GeometryTypes = ["Контур"] };
-                    }
+                    stylesToAdd[kv.Key] = new StyleInfo { Name = kv.Value.Name, GeometryTypes = TranslateGeometryTypes(kv.Value.GeometryTypes) };
                 }
                 Report.Add(new LayerReportRecord
                 {
