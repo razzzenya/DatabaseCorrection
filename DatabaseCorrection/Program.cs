@@ -4,7 +4,7 @@ class Program
 {
     static async Task Main()
     {
-        var Correction = new Correction();
-        Correction.StartProcessing();
+        var databaseComparison = new DatabaseComparison();
+        databaseComparison.StartProcessing();
     }
 }
