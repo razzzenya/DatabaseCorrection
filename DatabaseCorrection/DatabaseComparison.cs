@@ -163,14 +163,14 @@ public class DatabaseComparison
                 {
                     if (!layerUnion.Styles.ContainsKey(kv.Key))
                     {
-                        stylesToRemove[kv.Key] = kv.Value; // Удаление стиля, если его нет в объединённых стилях ReferenceLayers
+                        stylesToRemove[kv.Key] = new StyleInfo { Name = kv.Value.Name, GeometryTypes = TranslateGeometryTypes(kv.Value.GeometryTypes) }; // Удаление стиля, если его нет в объединённых стилях ReferenceLayers
                     }
                 }
                 foreach (var kv in layerUnion.Styles)
                 {
                     if (!curLayer.Styles.TryGetValue(kv.Key, out StyleInfo? style)) // Если нет такого ключа, то добавляем стиль
                     {
-                        stylesToAdd[kv.Key] = kv.Value;
+                        stylesToAdd[kv.Key] = new StyleInfo { Name = kv.Value.Name, GeometryTypes = TranslateGeometryTypes(kv.Value.GeometryTypes) };
                     }
                     else
                     {
@@ -385,5 +385,16 @@ public class DatabaseComparison
     {
         var index = str.IndexOf('_');
         return index >= 0 ? str.Substring(index + 1) : str;
+    }
+
+    static List<string> TranslateGeometryTypes(List<string> geomTypes)
+    {
+        for (int i = 0; i < geomTypes.Count; i++)
+        {
+            if (geomTypes[i] == "Multipoint") geomTypes[i] = "Знак";
+            else if (geomTypes[i] == "Multiline" || geomTypes[i] == "Multipolygon") geomTypes[i] = "Контур";
+            else geomTypes[i] = "";
+        }
+        return geomTypes;
     }
 }
