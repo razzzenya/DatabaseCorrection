@@ -130,11 +130,6 @@ public class DatabaseComparison
             var curLayer = CurrentLayers.FirstOrDefault(l => l.Name == layerUnion.Name);
             if (curLayer == null) // Слой есть в референсной бд, но отсутствует в нашей
             {
-                var stylesToAdd = new Dictionary<string, StyleInfo>();
-                foreach (var kv in layerUnion.Styles)
-                {
-                    stylesToAdd[kv.Key] = new StyleInfo { Name = kv.Value.Name, GeometryTypes = TranslateGeometryTypes(kv.Value.GeometryTypes) };
-                }
                 Report.Add(new LayerReportRecord
                 {
                     LayerName = layerUnion.Name,
@@ -156,14 +151,14 @@ public class DatabaseComparison
                 {
                     if (!layerUnion.Styles.ContainsKey(kv.Key))
                     {
-                        stylesToRemove[kv.Key] = new StyleInfo { Name = kv.Value.Name, GeometryTypes = TranslateGeometryTypes(kv.Value.GeometryTypes) }; // Удаление стиля, если его нет в объединённых стилях ReferenceLayers
+                        stylesToRemove[kv.Key] = new StyleInfo { Name = kv.Value.Name, GeometryTypes = kv.Value.GeometryTypes }; // Удаление стиля, если его нет в объединённых стилях ReferenceLayers
                     }
                 }
                 foreach (var kv in layerUnion.Styles)
                 {
                     if (!curLayer.Styles.TryGetValue(kv.Key, out StyleInfo? style)) // Если нет такого ключа, то добавляем стиль
                     {
-                        stylesToAdd[kv.Key] = new StyleInfo { Name = kv.Value.Name, GeometryTypes = TranslateGeometryTypes(kv.Value.GeometryTypes) };
+                        stylesToAdd[kv.Key] = new StyleInfo { Name = kv.Value.Name, GeometryTypes = layerUnion.Styles[kv.Key].GeometryTypes };
                     }
                     else
                     {
@@ -173,37 +168,25 @@ public class DatabaseComparison
                         {
                             if (!refGeomTypes.Contains("Multipoint"))
                             {
-                                stylesToRemove[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = ["Знак"] };
-                                if (refGeomTypes.Contains("Multiline") || refGeomTypes.Contains("Multipolygon"))
-                                {
-                                    stylesToAdd[kv.Key] = new StyleInfo { Name = kv.Value.Name, GeometryTypes = ["Контур"] };
-                                }
+                                stylesToRemove[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = ["Multipoint"] };
                             }
-                            else
+                            var geoms = refGeomTypes.Except(["Multipoint"]).ToList();
+                            if (geoms.Count != 0)
                             {
-                                if (refGeomTypes.Contains("Multiline") || refGeomTypes.Contains("Multipolygon"))
-                                {
-                                    stylesToAdd[kv.Key] = new StyleInfo { Name = kv.Value.Name, GeometryTypes = ["Контур"] };
-                                }
+                                stylesToAdd[kv.Key] = new StyleInfo { Name = kv.Value.Name, GeometryTypes = geoms };
                             }
                         }
                         else if (curGeomTypes.Count == 2) // Тип геометрии "Контур"
                         {
                             if (!refGeomTypes.Contains("Multiline") && !refGeomTypes.Contains("Multipolygon"))
                             {
-                                stylesToRemove[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = ["Контур"] };
-                                if (refGeomTypes.Contains("Multipoint"))
-                                {
-                                    stylesToAdd[kv.Key] = new StyleInfo { Name = kv.Value.Name, GeometryTypes = ["Знак"] };
-                                }
+                                stylesToRemove[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = ["Multiline", "Multipolygon"] };
                             }
-                            else
+                            if (refGeomTypes.Contains("Multipoint"))
                             {
-                                if (refGeomTypes.Contains("Multipoint"))
-                                {
-                                    stylesToAdd[kv.Key] = new StyleInfo { Name = kv.Value.Name, GeometryTypes = ["Знак"] };
-                                }
+                                stylesToAdd[kv.Key] = new StyleInfo { Name = kv.Value.Name, GeometryTypes = ["Multipoint"] };
                             }
+
                         }
                     }
                 }
@@ -223,7 +206,13 @@ public class DatabaseComparison
                 });
             }
         }
-        File.WriteAllText("LayerReport.json", JsonSerializer.Serialize(Report, new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+        File.WriteAllText("LayerReport.json",
+            JsonSerializer.Serialize(Report, new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+                DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault
+            }));
     }
 
     static List<string> GetTableNames(string connStr, string? prefix = null, string? exclude = null)
@@ -378,16 +367,5 @@ public class DatabaseComparison
     {
         var index = str.IndexOf('_');
         return index >= 0 ? str.Substring(index + 1) : str;
-    }
-
-    static List<string> TranslateGeometryTypes(List<string> geomTypes)
-    {
-        for (int i = 0; i < geomTypes.Count; i++)
-        {
-            if (geomTypes[i] == "Multipoint") geomTypes[i] = "Знак";
-            else if (geomTypes[i] == "Multiline" || geomTypes[i] == "Multipolygon") geomTypes[i] = "Контур";
-            else geomTypes[i] = "";
-        }
-        return geomTypes.Distinct().ToList();
     }
 }
