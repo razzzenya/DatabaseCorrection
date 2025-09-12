@@ -30,11 +30,11 @@ public class ReferenceLayersUnion
 public class LayerReportRecord
 {
     public required string LayerName { get; set; }
-    public List<string> Actions { get; set; } = [];
-    public List<string> FieldsToAdd { get; set; } = [];
-    public List<string> FieldsToRemove { get; set; } = [];
-    public Dictionary<string, StyleInfo> StylesToAdd { get; set; } = [];
-    public Dictionary<string, StyleInfo> StylesToRemove { get; set; } = [];
+    public List<string>? Actions { get; set; } = [];
+    public List<string>? FieldsToAdd { get; set; } = [];
+    public List<string>? FieldsToRemove { get; set; } = [];
+    public Dictionary<string, StyleInfo>? StylesToAdd { get; set; } = [];
+    public Dictionary<string, StyleInfo>? StylesToRemove { get; set; } = [];
 }
 
 public class DatabaseComparison
@@ -190,20 +190,25 @@ public class DatabaseComparison
                         }
                     }
                 }
-                if (fieldsToAdd.Count != 0) actions.Add("Add field(s)");
-                if (fieldsToRemove.Count != 0) actions.Add("Remove field(s)");
-                if (stylesToAdd.Count != 0) actions.Add("Add style(s)");
-                if (stylesToRemove.Count != 0) actions.Add("Remove style(s)");
-                if (actions.Count == 0) continue; // Если нет действий, то не добавляем запись в отчёт
-                Report.Add(new LayerReportRecord
+                var record = new LayerReportRecord
                 {
-                    LayerName = curLayer.DBName,
-                    Actions = actions,
-                    FieldsToAdd = fieldsToAdd,
-                    FieldsToRemove = fieldsToRemove,
-                    StylesToAdd = stylesToAdd,
-                    StylesToRemove = stylesToRemove
-                });
+                    LayerName = curLayer.DBName
+                };
+                if (fieldsToAdd.Count != 0) actions.Add("Add field(s)");
+                else fieldsToAdd = null;
+                if (fieldsToRemove.Count != 0) actions.Add("Remove field(s)");
+                else fieldsToRemove = null;
+                if (stylesToAdd.Count != 0) actions.Add("Add style(s)");
+                else stylesToAdd = null;
+                if (stylesToRemove.Count != 0) actions.Add("Remove style(s)");
+                else stylesToRemove = null;
+                if (actions.Count == 0) continue; // Если нет действий, то не добавляем запись в отчёт
+                record.Actions = actions;
+                record.FieldsToAdd = fieldsToAdd;
+                record.FieldsToRemove = fieldsToRemove;
+                record.StylesToAdd = stylesToAdd;
+                record.StylesToRemove = stylesToRemove;
+                Report.Add(record);
             }
         }
         File.WriteAllText("LayerReport.json",
