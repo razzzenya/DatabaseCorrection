@@ -46,7 +46,7 @@ public class DatabaseComparison
     public void StartProcessing()
     {
         var refConnStr = "terplan-layer-library-v2.gpkg";
-        var curConnStr = "Pooling=false;Data Source=192.168.0.109,1433;Initial Catalog=Empty;User ID=sa;Password=samis;TrustServerCertificate=True";
+        var curConnStr = "Pooling=false;Data Source=192.168.0.100,1433;Initial Catalog=Empty;User ID=sa;Password=samis;TrustServerCertificate=True";
 
         var refTables = GetTableNames(refConnStr, exclude: "layer_styles");
         var actualTables = GetTableNames(curConnStr, prefix: "tpAcual");
@@ -164,29 +164,36 @@ public class DatabaseComparison
                     {
                         var refGeomTypes = kv.Value.GeometryTypes;
                         var curGeomTypes = style.GeometryTypes;
-                        if (curGeomTypes.Count == 1) // Тип геометрии "Знак"
+                        if (curGeomTypes.Contains("Multipoint") && !refGeomTypes.Contains("Multipoint"))
                         {
-                            if (!refGeomTypes.Contains("Multipoint"))
-                            {
-                                stylesToRemove[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = ["Multipoint"] };
-                            }
-                            var geoms = refGeomTypes.Except(["Multipoint"]).ToList();
-                            if (geoms.Count != 0)
-                            {
-                                stylesToAdd[kv.Key] = new StyleInfo { Name = kv.Value.Name, GeometryTypes = geoms };
-                            }
+                            stylesToRemove[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = ["Multipoint"] };
                         }
-                        else if (curGeomTypes.Count == 2) // Тип геометрии "Контур"
+                        else if (!curGeomTypes.Contains("Multipoint") && refGeomTypes.Contains("Multipoint"))
+                        {
+                            stylesToAdd[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = ["Multipoint"] };
+                        }
+
+                        if (curGeomTypes.Contains("Multiline") && curGeomTypes.Contains("Multipolygon"))
                         {
                             if (!refGeomTypes.Contains("Multiline") && !refGeomTypes.Contains("Multipolygon"))
                             {
                                 stylesToRemove[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = ["Multiline", "Multipolygon"] };
                             }
-                            if (refGeomTypes.Contains("Multipoint"))
+                        }
+                        else
+                        {
+                            if(refGeomTypes.Contains("Multiline") && !refGeomTypes.Contains("Multipolygon"))
                             {
-                                stylesToAdd[kv.Key] = new StyleInfo { Name = kv.Value.Name, GeometryTypes = ["Multipoint"] };
+                                stylesToAdd[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = ["Multiline"] };
                             }
-
+                            else if (!refGeomTypes.Contains("Multiline") && refGeomTypes.Contains("Multipolygon"))
+                            {
+                                stylesToAdd[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = ["Multipolygon"] };
+                            }
+                            else if(refGeomTypes.Contains("Multiline") && refGeomTypes.Contains("Multipolygon"))
+                            {
+                                stylesToAdd[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = ["Multiline", "Multipolygon"] };
+                            }
                         }
                     }
                 }
@@ -325,6 +332,8 @@ public class DatabaseComparison
             if (style.key == "") continue; // Стиль без []
             if (!styles.ContainsKey(style.key))
                 styles.Add(style.key, style.styleInfo);
+            else if (styles[style.key].GeometryTypes.Except(style.styleInfo.GeometryTypes).Any()) // Если есть новые типы геометрий, то добавляем их
+                styles[style.key].GeometryTypes = styles[style.key].GeometryTypes.Union(style.styleInfo.GeometryTypes).ToList();
         }
         reader.Close();
         return styles;
