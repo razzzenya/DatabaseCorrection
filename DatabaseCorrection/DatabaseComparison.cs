@@ -42,15 +42,17 @@ public class DatabaseComparison
     public List<ReferenceLayersUnion> LayersUnion { get; set; } = [];
     public List<LayerInfo> CurrentLayers { get; set; } = [];
     List<LayerReportRecord> Report { get; set; } = [];
+    List<LayerInfo> ExceptLayers { get; set; } = [];
 
     public void StartProcessing()
     {
         var refConnStr = "terplan-layer-library-v2.gpkg";
-        var curConnStr = "Pooling=false;Data Source=192.168.0.100,1433;Initial Catalog=Empty;User ID=sa;Password=samis;TrustServerCertificate=True";
+        var curConnStr = "Pooling=false;Data Source=192.168.0.102,1433;Initial Catalog=Empty;User ID=sa;Password=samis;TrustServerCertificate=True";
 
         var refTables = GetTableNames(refConnStr, exclude: "layer_styles");
         var actualTables = GetTableNames(curConnStr, prefix: "tpAcual");
         var plannedTables = GetTableNames(curConnStr, prefix: "tpPlan");
+        GenerateExceptLayersList();
 
         foreach (var actualTable in actualTables)
         {
@@ -100,6 +102,20 @@ public class DatabaseComparison
                     else
                     {
                         layersUnion.Styles[kv.Key] = kv.Value; // Добавление нового стиля
+                    }
+                }
+            }
+        }
+        for (var i = 0; i < LayersUnion.Count; i++)
+        {
+            if (ExceptLayers.Any(l => l.Name == LayersUnion[i].Name))
+            {
+                foreach (var style in LayersUnion[i].Styles)
+                {
+                    if (!style.Value.GeometryTypes.Contains("Multipolygon") && !style.Value.GeometryTypes.Contains("Multiline"))
+                    {
+                        style.Value.GeometryTypes.Add("Multipolygon");
+                        style.Value.GeometryTypes.Add("Multiline");
                     }
                 }
             }
@@ -177,23 +193,43 @@ public class DatabaseComparison
                         {
                             if (!refGeomTypes.Contains("Multiline") && !refGeomTypes.Contains("Multipolygon"))
                             {
-                                stylesToRemove[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = ["Multiline", "Multipolygon"] };
+                                if (stylesToRemove.TryGetValue(kv.Key, out var existingStyle))
+                                {
+                                    existingStyle.GeometryTypes.Add("Multiline");
+                                    existingStyle.GeometryTypes.Add("Multipolygon");
+                                }
+                                else
+                                {
+                                    stylesToRemove[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = ["Multiline", "Multipolygon"] };
+                                }
                             }
                         }
                         else
                         {
-                            if(refGeomTypes.Contains("Multiline") && !refGeomTypes.Contains("Multipolygon"))
+                            var typesToAdd = new List<string>();
+                            if (refGeomTypes.Contains("Multiline") && !refGeomTypes.Contains("Multipolygon"))
                             {
-                                stylesToAdd[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = ["Multiline"] };
+                                typesToAdd.Add("Multiline");
                             }
                             else if (!refGeomTypes.Contains("Multiline") && refGeomTypes.Contains("Multipolygon"))
                             {
-                                stylesToAdd[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = ["Multipolygon"] };
+                                typesToAdd.Add("Multipolygon");
                             }
                             else if(refGeomTypes.Contains("Multiline") && refGeomTypes.Contains("Multipolygon"))
                             {
-                                stylesToAdd[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = ["Multiline", "Multipolygon"] };
+                                typesToAdd.Add("Multiline");
+                                typesToAdd.Add("Multipolygon");
                             }
+                            if (typesToAdd.Count == 0) continue;
+                            if (stylesToAdd.TryGetValue(kv.Key, out var existingStyle))
+                            {
+                                existingStyle.GeometryTypes.Union(typesToAdd);
+                            }
+                            else
+                            {
+                                stylesToAdd[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = typesToAdd };
+                            }
+
                         }
                     }
                 }
@@ -218,6 +254,7 @@ public class DatabaseComparison
                 Report.Add(record);
             }
         }
+
         File.WriteAllText("LayerReport.json",
             JsonSerializer.Serialize(Report, new JsonSerializerOptions
             {
@@ -225,6 +262,21 @@ public class DatabaseComparison
                 Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
                 DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault
             }));
+    }
+
+    public void GenerateExceptLayersList()
+    {
+        var layerNames = File.ReadAllLines("../../../Exceptions.txt").Select(l => l.Trim()).Where(l => l != "").ToList();
+        foreach (var layerName in layerNames)
+        {
+            ExceptLayers.Add(new LayerInfo
+            {
+                Name = layerName,
+                DBName = "",
+                Fields = [],
+                Styles = []
+            });
+        }
     }
 
     static List<string> GetTableNames(string connStr, string? prefix = null, string? exclude = null)
