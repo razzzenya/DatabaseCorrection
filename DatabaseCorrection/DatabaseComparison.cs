@@ -17,6 +17,7 @@ public class StyleInfo
 {
     public string Name { get; set; } = string.Empty;
     public List<string> GeometryTypes { get; set; } = [];
+    public List<string> DBIDs { get; set; } = [];
 }
 
 public class ReferenceLayersUnion
@@ -143,8 +144,8 @@ public class DatabaseComparison
         }
         foreach (var layerUnion in LayersUnion)
         {
-            var curLayer = CurrentLayers.FirstOrDefault(l => l.Name == layerUnion.Name);
-            if (curLayer == null) // Слой есть в референсной бд, но отсутствует в нашей
+            var curLayers = CurrentLayers.Where(l => l.Name == layerUnion.Name);
+            if (!curLayers.Any()) // Слой есть в референсной бд, но отсутствует в нашей
             {
                 Report.Add(new LayerReportRecord
                 {
@@ -156,102 +157,123 @@ public class DatabaseComparison
                     StylesToRemove = []
                 });
             }
-            else // Слой есть в обоих бд
+            else // Слой/и есть в обоих бд
             {
-                var actions = new List<string>();
-                var fieldsToAdd = layerUnion.Fields.Except(curLayer.Fields.Concat(["geom", ""])).ToList();
-                var fieldsToRemove = curLayer.Fields.Except(layerUnion.Fields.Append("ID")).ToList();
-                var stylesToAdd = new Dictionary<string, StyleInfo>();
-                var stylesToRemove = new Dictionary<string, StyleInfo>();
-                foreach (var kv in curLayer.Styles)
+                foreach(var curLayer in curLayers)
                 {
-                    if (!layerUnion.Styles.ContainsKey(kv.Key))
+                    var actions = new List<string>();
+                    var fieldsToAdd = layerUnion.Fields.Except(curLayer.Fields.Concat(["geom", ""])).ToList();
+                    var fieldsToRemove = curLayer.Fields.Except(layerUnion.Fields.Append("ID")).ToList();
+                    var stylesToAdd = new Dictionary<string, StyleInfo>();
+                    var stylesToRemove = new Dictionary<string, StyleInfo>();
+                    foreach (var kv in curLayer.Styles)
                     {
-                        stylesToRemove[kv.Key] = new StyleInfo { Name = kv.Value.Name, GeometryTypes = kv.Value.GeometryTypes }; // Удаление стиля, если его нет в объединённых стилях ReferenceLayers
-                    }
-                }
-                foreach (var kv in layerUnion.Styles)
-                {
-                    if (!curLayer.Styles.TryGetValue(kv.Key, out StyleInfo? style)) // Если нет такого ключа, то добавляем стиль
-                    {
-                        stylesToAdd[kv.Key] = new StyleInfo { Name = kv.Value.Name, GeometryTypes = layerUnion.Styles[kv.Key].GeometryTypes };
-                    }
-                    else
-                    {
-                        var refGeomTypes = kv.Value.GeometryTypes;
-                        var curGeomTypes = style.GeometryTypes;
-                        if (curGeomTypes.Contains("Multipoint") && !refGeomTypes.Contains("Multipoint"))
+                        if (!layerUnion.Styles.ContainsKey(kv.Key))
                         {
-                            stylesToRemove[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = ["Multipoint"] };
+                            stylesToRemove[kv.Key] = new StyleInfo { Name = kv.Value.Name, GeometryTypes = kv.Value.GeometryTypes, DBIDs = kv.Value.DBIDs.Select(id => TrimAfterUnderscore(id)).ToList() }; // Удаление стиля, если его нет в объединённых стилях ReferenceLayers
                         }
-                        else if (!curGeomTypes.Contains("Multipoint") && refGeomTypes.Contains("Multipoint"))
+                    }
+                    foreach (var kv in layerUnion.Styles)
+                    {
+                        if (!curLayer.Styles.TryGetValue(kv.Key, out StyleInfo? style)) // Если нет такого ключа, то добавляем стиль
                         {
-                            stylesToAdd[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = ["Multipoint"] };
-                        }
-
-                        if (curGeomTypes.Contains("Multiline") && curGeomTypes.Contains("Multipolygon"))
-                        {
-                            if (!refGeomTypes.Contains("Multiline") && !refGeomTypes.Contains("Multipolygon"))
-                            {
-                                if (stylesToRemove.TryGetValue(kv.Key, out var existingStyle))
-                                {
-                                    existingStyle.GeometryTypes.Add("Multiline");
-                                    existingStyle.GeometryTypes.Add("Multipolygon");
-                                }
-                                else
-                                {
-                                    stylesToRemove[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = ["Multiline", "Multipolygon"] };
-                                }
-                            }
+                            stylesToAdd[kv.Key] = new StyleInfo { Name = kv.Value.Name, GeometryTypes = layerUnion.Styles[kv.Key].GeometryTypes };
                         }
                         else
                         {
-                            var typesToAdd = new List<string>();
-                            if (refGeomTypes.Contains("Multiline") && !refGeomTypes.Contains("Multipolygon"))
+                            var refGeomTypes = kv.Value.GeometryTypes;
+                            var curGeomTypes = style.GeometryTypes;
+                            if (curGeomTypes.Contains("Multipoint") && !refGeomTypes.Contains("Multipoint"))
                             {
-                                typesToAdd.Add("Multiline");
+                                var dbid = style.DBIDs.FirstOrDefault(id => id.EndsWith("_Multipoint"));
+                                stylesToRemove[kv.Key] = new StyleInfo
+                                {
+                                    Name = style.Name,
+                                    GeometryTypes = ["Multipoint"],
+                                    DBIDs = style.DBIDs
+                                        .Where(id => id.EndsWith("_Multipoint"))
+                                        .Select(id => TrimAfterUnderscore(id))
+                                        .ToList()
+                                };
                             }
-                            else if (!refGeomTypes.Contains("Multiline") && refGeomTypes.Contains("Multipolygon"))
+                            else if (!curGeomTypes.Contains("Multipoint") && refGeomTypes.Contains("Multipoint"))
                             {
-                                typesToAdd.Add("Multipolygon");
+                                stylesToAdd[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = ["Multipoint"] };
                             }
-                            else if(refGeomTypes.Contains("Multiline") && refGeomTypes.Contains("Multipolygon"))
+
+                            if (curGeomTypes.Contains("Multiline") && curGeomTypes.Contains("Multipolygon"))
                             {
-                                typesToAdd.Add("Multiline");
-                                typesToAdd.Add("Multipolygon");
-                            }
-                            if (typesToAdd.Count == 0) continue;
-                            if (stylesToAdd.TryGetValue(kv.Key, out var existingStyle))
-                            {
-                                existingStyle.GeometryTypes.Union(typesToAdd);
+                                if (!refGeomTypes.Contains("Multiline") && !refGeomTypes.Contains("Multipolygon"))
+                                {
+                                    if (stylesToRemove.TryGetValue(kv.Key, out var existingStyle))
+                                    {
+                                        existingStyle.GeometryTypes.AddRange(["Multiline", "Multipolygon"]);
+                                        existingStyle.DBIDs.AddRange(
+                                            style.DBIDs
+                                                .Where(id => id.EndsWith("_Multiline"))
+                                                .Select(id => TrimAfterUnderscore(id))
+                                        );
+                                    }
+                                    else
+                                    {
+                                        stylesToRemove[kv.Key] = new StyleInfo
+                                        {
+                                            Name = style.Name,
+                                            GeometryTypes = ["Multiline", "Multipolygon"],
+                                            DBIDs = style.DBIDs.Where(id => id.EndsWith("_Multiline"))
+                                                         .Select(id => TrimAfterUnderscore(id)).ToList()
+                                        };
+                                    }
+                                }
                             }
                             else
                             {
-                                stylesToAdd[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = typesToAdd };
+                                var typesToAdd = new List<string>();
+                                if (refGeomTypes.Contains("Multiline") && !refGeomTypes.Contains("Multipolygon"))
+                                {
+                                    typesToAdd.Add("Multiline");
+                                }
+                                else if (!refGeomTypes.Contains("Multiline") && refGeomTypes.Contains("Multipolygon"))
+                                {
+                                    typesToAdd.Add("Multipolygon");
+                                }
+                                else if (refGeomTypes.Contains("Multiline") && refGeomTypes.Contains("Multipolygon"))
+                                {
+                                    typesToAdd.Add("Multiline");
+                                    typesToAdd.Add("Multipolygon");
+                                }
+                                if (typesToAdd.Count == 0) continue;
+                                if (stylesToAdd.TryGetValue(kv.Key, out var existingStyle))
+                                {
+                                    existingStyle.GeometryTypes.Union(typesToAdd);
+                                }
+                                else
+                                {
+                                    stylesToAdd[kv.Key] = new StyleInfo { Name = style.Name, GeometryTypes = typesToAdd };
+                                }
                             }
-
                         }
                     }
+                    var record = new LayerReportRecord
+                    {
+                        LayerName = curLayer.DBName
+                    };
+                    if (fieldsToAdd.Count != 0) actions.Add("Add field(s)");
+                    else fieldsToAdd = null;
+                    if (fieldsToRemove.Count != 0) actions.Add("Remove field(s)");
+                    else fieldsToRemove = null;
+                    if (stylesToAdd.Count != 0) actions.Add("Add style(s)");
+                    else stylesToAdd = null;
+                    if (stylesToRemove.Count != 0) actions.Add("Remove style(s)");
+                    else stylesToRemove = null;
+                    if (actions.Count == 0) continue; // Если нет действий, то не добавляем запись в отчёт
+                    record.Actions = actions;
+                    record.FieldsToAdd = fieldsToAdd;
+                    record.FieldsToRemove = fieldsToRemove;
+                    record.StylesToAdd = stylesToAdd;
+                    record.StylesToRemove = stylesToRemove;
+                    Report.Add(record);
                 }
-                var record = new LayerReportRecord
-                {
-                    LayerName = curLayer.DBName
-                };
-                if (fieldsToAdd.Count != 0) actions.Add("Add field(s)");
-                else fieldsToAdd = null;
-                if (fieldsToRemove.Count != 0) actions.Add("Remove field(s)");
-                else fieldsToRemove = null;
-                if (stylesToAdd.Count != 0) actions.Add("Add style(s)");
-                else stylesToAdd = null;
-                if (stylesToRemove.Count != 0) actions.Add("Remove style(s)");
-                else stylesToRemove = null;
-                if (actions.Count == 0) continue; // Если нет действий, то не добавляем запись в отчёт
-                record.Actions = actions;
-                record.FieldsToAdd = fieldsToAdd;
-                record.FieldsToRemove = fieldsToRemove;
-                record.StylesToAdd = stylesToAdd;
-                record.StylesToRemove = stylesToRemove;
-                Report.Add(record);
             }
         }
 
@@ -374,18 +396,24 @@ public class DatabaseComparison
         {
             layerId = reader.GetString(0);
         }
-        command.CommandText = $"SELECT STYLENAME FROM INGEO_STYLES WHERE LAYERID = '{layerId}'";
+        command.CommandText = $"SELECT ID, STYLENAME FROM INGEO_STYLES WHERE LAYERID = '{layerId}'";
         reader.Close();
         reader = command.ExecuteReader();
         while (reader.Read())
         {
-            var styleString = reader.GetString(0);
-            var style = ParseStyleFromCurrentTable(styleString);
+            var id = reader.GetString(0);
+            var styleString = reader.GetString(1);
+            var style = ParseStyleFromCurrentTable(styleString, id);
             if (style.key == "") continue; // Стиль без []
             if (!styles.ContainsKey(style.key))
+            {
                 styles.Add(style.key, style.styleInfo);
-            else if (styles[style.key].GeometryTypes.Except(style.styleInfo.GeometryTypes).Any()) // Если есть новые типы геометрий, то добавляем их
+            }
+            else if (styles[style.key].GeometryTypes.Except(style.styleInfo.GeometryTypes).Any() || !styles[style.key].DBIDs.Contains(style.styleInfo.DBIDs[0])) // Если есть новые типы геометрий, то добавляем их
+            {
                 styles[style.key].GeometryTypes = styles[style.key].GeometryTypes.Union(style.styleInfo.GeometryTypes).ToList();
+                styles[style.key].DBIDs = styles[style.key].DBIDs.Union(style.styleInfo.DBIDs).ToList();
+            }
         }
         reader.Close();
         return styles;
@@ -412,15 +440,27 @@ public class DatabaseComparison
         return result;
     }
 
-    static (string key, StyleInfo styleInfo) ParseStyleFromCurrentTable(string styleString)
+    static (string key, StyleInfo styleInfo) ParseStyleFromCurrentTable(string styleString, string id)
     {
         var firstIndex = styleString.IndexOf('[');
         var secondIndex = styleString.IndexOf(']');
         if (firstIndex < 0 || secondIndex < 0 || secondIndex <= firstIndex)
             return ("", new StyleInfo { Name = "", GeometryTypes = [""] }); // Стиль без []
-        var geometryTypes = styleString.Contains("Знак") ? ["Multipoint"] :
-                           styleString.Contains("Контур") ? new List<string> { "Multiline", "Multipolygon" } : [""];
-        return (styleString.Substring(firstIndex + 1, secondIndex - firstIndex - 1), new StyleInfo { Name = styleString.Substring(0, firstIndex).Trim(), GeometryTypes = geometryTypes });
+        //var geometryTypes = styleString.Contains("Знак") ? ["Multipoint"] :
+        //                   styleString.Contains("Контур") ? new List<string> { "Multiline", "Multipolygon" } : [""];
+        var geometryTypes = new List<string>();
+        var DBIDs = new List<string>();
+        if (styleString.Contains("Знак"))
+        {
+            geometryTypes.Add("Multipoint");
+            DBIDs.Add(id + "_Multipoint");
+        }
+        else
+        {
+            geometryTypes.AddRange(["Multiline", "Multipolygon"]);
+            DBIDs.Add(id + "_Multiline");
+        }
+        return (styleString.Substring(firstIndex + 1, secondIndex - firstIndex - 1), new StyleInfo { Name = styleString.Substring(0, firstIndex).Trim(), GeometryTypes = geometryTypes, DBIDs = DBIDs });
     }
 
     static string TrimAfterUnderscore(string str)
